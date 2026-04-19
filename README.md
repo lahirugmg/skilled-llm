@@ -41,6 +41,13 @@ Skilled LLM is designed as **independent, installable modules** that you can use
 
 **Use Case**: Expose Claude CLI as an OpenAI-compatible API for your team.
 
+**📖 Complete CLI-to-LLM Documentation**: See [cli_to_llm/](cli_to_llm/) folder for:
+- Full README with architecture and examples
+- LinkedIn post and value proposition
+- Code examples and integration guides
+- Technical architecture documentation
+- Visual diagrams (Excalidraw)
+
 ### Optional Layers (Future/Separate Packages)
 
 **Layer 2: Backend Router** (`skilled-llm-router`)

@@ -1,0 +1,14 @@
+{
+  "model": "claude-sim-v1",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Prefer structured, thoughtful answers."
+    },
+    {
+      "role": "user",
+      "content": "Explain how a local CLI shim can call a Dockerized simulator."
+    }
+  ]
+}
+
