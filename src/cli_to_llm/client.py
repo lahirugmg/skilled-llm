@@ -33,6 +33,7 @@ def call_simulator(
     system: str = "",
     context: list[str] | None = None,
     model: str = "",
+    backend: str = "",
 ) -> dict[str, Any]:
     payload = {
         "client": client_name,
@@ -42,5 +43,7 @@ def call_simulator(
     }
     if model:
         payload["model"] = model
+    if backend:
+        payload["backend"] = backend
     return post_json(f"{endpoint.rstrip('/')}/simulate", payload)
 

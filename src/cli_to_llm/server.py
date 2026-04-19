@@ -6,12 +6,14 @@ import json
 import os
 from typing import Any
 
+from cli_to_llm.backends import (
+    BackendRequest,
+    build_chat_completion,
+    invoke_backend,
+)
 from cli_to_llm.simulator import (
     DEFAULT_MODEL,
-    SimulationRequest,
-    build_chat_completion,
     normalize_client,
-    simulate_response,
 )
 
 
@@ -89,23 +91,29 @@ def handle_post(
         prompt = str(payload.get("prompt", "")).strip()
         if not prompt:
             return HTTPStatus.BAD_REQUEST, {"error": "prompt is required"}
-        response = simulate_response(
-            SimulationRequest(
-                client=normalize_client(payload.get("client"), payload.get("model")),
-                prompt=prompt,
-                system=str(payload.get("system", "")),
-                context=[str(item) for item in payload.get("context", []) if item],
-                model=str(payload.get("model") or default_model),
-                max_tokens=int(payload.get("max_tokens", 400)),
-                temperature=float(payload.get("temperature", 0.2)),
+        try:
+            response = invoke_backend(
+                BackendRequest(
+                    client=normalize_client(payload.get("client"), payload.get("model")),
+                    prompt=prompt,
+                    system=str(payload.get("system", "")),
+                    context=[str(item) for item in payload.get("context", []) if item],
+                    model=str(payload.get("model") or default_model),
+                    max_tokens=int(payload.get("max_tokens", 400)),
+                    temperature=float(payload.get("temperature", 0.2)),
+                ),
+                backend=str(payload.get("backend") or os.getenv("CLI_TO_LLM_BACKEND", "simulator")),
             )
-        )
+        except (RuntimeError, ValueError) as exc:
+            return HTTPStatus.BAD_REQUEST, {"error": str(exc)}
         return HTTPStatus.OK, response
 
     if path == "/v1/chat/completions":
         try:
-            response = build_chat_completion(payload)
-        except ValueError as exc:
+            resolved_payload = dict(payload)
+            resolved_payload.setdefault("backend", os.getenv("CLI_TO_LLM_BACKEND", "simulator"))
+            response = build_chat_completion(resolved_payload, default_model=default_model)
+        except (RuntimeError, ValueError) as exc:
             return HTTPStatus.BAD_REQUEST, {"error": str(exc)}
         return HTTPStatus.OK, response
 

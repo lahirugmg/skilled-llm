@@ -10,6 +10,12 @@ services:
       CLI_TO_LLM_HOST: 0.0.0.0
       CLI_TO_LLM_PORT: "8080"
       CLI_TO_LLM_DEFAULT_MODEL: local-sim-001
+      CLI_TO_LLM_BACKEND: simulator
+      GH_CONFIG_DIR: /root/.config/gh
+      GH_TOKEN: ${GH_TOKEN:-}
+    volumes:
+      - ${HOME}/.config/gh:/root/.config/gh
+      - gh_extensions:/root/.local/share/gh
     healthcheck:
       test:
         [
@@ -22,4 +28,42 @@ services:
       timeout: 3s
       retries: 5
       start_period: 3s
+
+  cli-to-llm-copilot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
+    container_name: cli-to-llm-copilot
+    profiles: ["copilot"]
+    platform: linux/amd64
+    ports:
+      - "8081:8080"
+    environment:
+      CLI_TO_LLM_HOST: 0.0.0.0
+      CLI_TO_LLM_PORT: "8080"
+      CLI_TO_LLM_DEFAULT_MODEL: copilot-cli
+      CLI_TO_LLM_BACKEND: copilot-cli
+      GH_CONFIG_DIR: /root/.config/gh
+      GH_TOKEN: ${GH_TOKEN:-}
+    volumes:
+      - ${HOME}/.config/gh:/root/.config/gh
+      - gh_extensions_copilot:/root/.local/share/gh
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8080/healthz', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+
+volumes:
+  gh_extensions:
+  gh_extensions_copilot:
 

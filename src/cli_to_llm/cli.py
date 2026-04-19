@@ -6,9 +6,9 @@ import os
 import sys
 from typing import Sequence
 
+from cli_to_llm.backends import BackendRequest, invoke_backend
 from cli_to_llm.client import DEFAULT_ENDPOINT, call_simulator
 from cli_to_llm.server import serve
-from cli_to_llm.simulator import SimulationRequest, simulate_response
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,9 +38,14 @@ def build_parser() -> argparse.ArgumentParser:
         client_parser.add_argument(
             "--direct",
             action="store_true",
-            help="Bypass HTTP and simulate locally in-process. Useful in restricted CI or sandboxes.",
+            help="Bypass HTTP and invoke the selected backend in-process.",
         )
         client_parser.add_argument("--endpoint", default=os.getenv("CLI_TO_LLM_ENDPOINT", DEFAULT_ENDPOINT))
+        client_parser.add_argument(
+            "--backend",
+            default=os.getenv("CLI_TO_LLM_BACKEND", "simulator"),
+            help="Backend to use: simulator or copilot-cli",
+        )
         client_parser.add_argument("--model", default="")
         client_parser.add_argument("--json", action="store_true", help="Print the full JSON response")
 
@@ -63,14 +68,15 @@ def resolve_prompt(args: argparse.Namespace) -> str:
 def run_client(command: str, args: argparse.Namespace) -> int:
     prompt = resolve_prompt(args)
     if args.direct:
-        response = simulate_response(
-            SimulationRequest(
+        response = invoke_backend(
+            BackendRequest(
                 client=command,
                 prompt=prompt,
                 system=args.system,
                 context=args.context,
                 model=args.model or "local-sim-001",
-            )
+            ),
+            backend=args.backend,
         )
     else:
         response = call_simulator(
@@ -80,6 +86,7 @@ def run_client(command: str, args: argparse.Namespace) -> int:
             system=args.system,
             context=args.context,
             model=args.model,
+            backend=args.backend,
         )
     if args.json:
         print(json.dumps(response, indent=2))
