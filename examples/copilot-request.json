@@ -1,0 +1,9 @@
+{
+  "client": "copilot",
+  "prompt": "Create a bash script that checks whether the local simulator is healthy",
+  "context": [
+    "The simulator is exposed on port 8080",
+    "The CLI wrapper should stay lightweight"
+  ]
+}
+
