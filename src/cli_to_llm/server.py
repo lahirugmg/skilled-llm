@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import base64
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from typing import Any
 
+from cli_to_llm.agents import BallerinaContextManager
 from cli_to_llm.backends import (
     BackendRequest,
     build_chat_completion,
@@ -79,6 +81,40 @@ def handle_get(path: str, default_model: str = DEFAULT_MODEL) -> tuple[HTTPStatu
                 "default_model": default_model,
             },
         )
+
+    # Ballerina context endpoints
+    if path.startswith("/ballerina/projects"):
+        try:
+            context_manager = BallerinaContextManager()
+            projects = context_manager.list_projects()
+            return HTTPStatus.OK, {"projects": projects}
+        except RuntimeError as exc:
+            return HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)}
+
+    if path.startswith("/ballerina/files/"):
+        # GET /ballerina/files/{project_name}
+        parts = path.split("/")
+        if len(parts) >= 4:
+            project_name = parts[3]
+            try:
+                context_manager = BallerinaContextManager()
+                files = context_manager.list_files(project_name=project_name)
+                return HTTPStatus.OK, {"project": project_name, "files": files}
+            except RuntimeError as exc:
+                return HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)}
+
+    if path.startswith("/ballerina/summary/"):
+        # GET /ballerina/summary/{project_name}
+        parts = path.split("/")
+        if len(parts) >= 4:
+            project_name = parts[3]
+            try:
+                context_manager = BallerinaContextManager()
+                summary = context_manager.get_project_summary(project_name)
+                return HTTPStatus.OK, summary
+            except RuntimeError as exc:
+                return HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)}
+
     return HTTPStatus.NOT_FOUND, {"error": f"unknown path {path}"}
 
 
@@ -116,6 +152,47 @@ def handle_post(
         except (RuntimeError, ValueError) as exc:
             return HTTPStatus.BAD_REQUEST, {"error": str(exc)}
         return HTTPStatus.OK, response
+
+    # Ballerina context file upload endpoint
+    if path == "/ballerina/upload":
+        try:
+            # Extract required fields
+            filename = str(payload.get("filename", "")).strip()
+            file_content_b64 = str(payload.get("content", "")).strip()
+            project_name = str(payload.get("project", "default")).strip()
+            module_name = payload.get("module")
+
+            if not filename:
+                return HTTPStatus.BAD_REQUEST, {"error": "filename is required"}
+            if not file_content_b64:
+                return HTTPStatus.BAD_REQUEST, {"error": "content is required"}
+
+            # Decode base64 content
+            try:
+                file_data = base64.b64decode(file_content_b64)
+            except Exception as exc:
+                return HTTPStatus.BAD_REQUEST, {"error": f"Invalid base64 content: {exc}"}
+
+            # Optional metadata
+            metadata = payload.get("metadata", {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+
+            # Upload via context manager
+            context_manager = BallerinaContextManager()
+            result = context_manager.upload_file(
+                file_data=file_data,
+                filename=filename,
+                project_name=project_name,
+                module_name=module_name if isinstance(module_name, str) else None,
+                metadata=metadata,
+            )
+
+            return HTTPStatus.OK, result
+        except ValueError as exc:
+            return HTTPStatus.BAD_REQUEST, {"error": str(exc)}
+        except RuntimeError as exc:
+            return HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)}
 
     return HTTPStatus.NOT_FOUND, {"error": f"unknown path {path}"}
 

@@ -6,8 +6,8 @@ Skilled LLM is designed as **independent, installable modules** that you can use
 
 1. **CLI-to-LLM** (Layer 1) - Convert AI CLIs to OpenAI-compatible APIs *(standalone, no dependencies)*
 2. **Backend Router** (Layer 2) - Multi-backend routing with fallback *(optional add-on)*
-3. **Context Engineering** (Layer 3) - RAG and knowledge injection *(optional add-on)*
-4. **Specialization Harness** (Layer 4) - LangGraph + critique loops *(optional add-on)*
+3. **Context Engineering** (Layer 3) - MinIO-backed LLM wiki + Milvus retrieval *(optional add-on)*
+4. **Specialization Harness** (Layer 4) - LangGraph multi-agent stewardship + critique loops *(optional add-on)*
 
 **Use what you need**: Install just CLI-to-LLM for a simple proxy, or add layers for enhanced functionality.
 
@@ -17,7 +17,7 @@ Skilled LLM is designed as **independent, installable modules** that you can use
 
 ```
 ┌────────────────────────────────────────┐
-│ Layer 4: Harness (LangGraph)          │  ← Optional
+│ Layer 4: Harness (Agents + LangGraph) │  ← Optional
 ├────────────────────────────────────────┤
 │ Layer 3: Context (RAG)                │  ← Optional
 ├────────────────────────────────────────┤
@@ -49,12 +49,12 @@ Skilled LLM is designed as **independent, installable modules** that you can use
 - Cost-based or latency-based routing
 
 **Layer 3: Context Engineering** (`skilled-llm-context`)
-- Wiki ingestion and vector search (Qdrant)
+- Wiki ingestion into MinIO and vector search with Milvus
 - RAG: Inject domain knowledge into prompts
 - Citation tracking
 
 **Layer 4: Specialization Harness** (`skilled-llm-harness`)
-- LangGraph orchestration
+- LangGraph orchestration with a multi-agent control plane
 - Critique and repair loops
 - Multi-pass refinement
 
@@ -66,7 +66,7 @@ Skilled LLM is designed as **independent, installable modules** that you can use
 |---------|-------------|
 | **Start small** | Use just CLI-to-LLM (Layer 1) without other dependencies |
 | **Add as needed** | Layer on routing, RAG, or harness when you need them |
-| **Independent deployment** | Run CLI-to-LLM standalone without Qdrant or LangGraph |
+| **Independent deployment** | Run CLI-to-LLM standalone without MinIO, Milvus, or LangGraph |
 | **Clear interfaces** | Each layer has defined API contracts |
 | **Easier testing** | Test each layer independently |
 | **Community friendly** | Contribute to CLI adapters without knowing LangGraph |
@@ -105,13 +105,13 @@ pip install skilled-llm
          └───────────┬──────────────────────────────────┘
                      │
          ┌───────────▼──────────────────────────────────┐
-         │  LangGraph Orchestration                     │
+         │  LangGraph + Agent Control Plane            │
          │  ┌──────────────────────────────────────┐    │
          │  │ normalize → classify → retrieve      │    │
          │  │    ↓                                 │    │
          │  │ build_prompt → route → invoke_backend│    │
          │  │    ↓                                 │    │
-         │  │ critique → repair → format → persist │    │
+         │  │ verify → repair → format → persist   │    │
          │  └──────────────────────────────────────┘    │
          └───────────┬──────────────────────────────────┘
                      │
@@ -121,13 +121,13 @@ pip install skilled-llm
 │ Knowledge│  │  Backend   │  │  Operational Data  │
 │  Layer   │  │  Adapters  │  │                    │
 ├──────────┤  ├────────────┤  ├────────────────────┤
-│ LLM Wiki │  │ OpenAI     │  │ Postgres:          │
-│ (Markdown│  │ Anthropic  │  │ - Specializers     │
-│  docs)   │  │ Local Model│  │ - Traces           │
-│          │  │            │  │ - LangGraph state  │
-│ Qdrant   │  │ CLI-to-LLM │  │ - Evals            │
-│ (vector  │  │  ├─ Claude │  │                    │
-│  search) │  │  ├─ Copilot│  │                    │
+│ MinIO    │  │ OpenAI     │  │ Postgres:          │
+│ (wiki    │  │ Anthropic  │  │ - Specializers     │
+│ source)  │  │ Local Model│  │ - Traces           │
+│          │  │            │  │ - Agent state      │
+│ Milvus   │  │ CLI-to-LLM │  │ - Evals            │
+│ (vector  │  │  ├─ Claude │  │ - Ingestion jobs   │
+│ index)   │  │  ├─ Copilot│  │                    │
 │          │  │  ├─ Cursor │  │                    │
 │          │  │  └─ Sim    │  │                    │
 └──────────┘  └────────────┘  └────────────────────┘
@@ -168,10 +168,11 @@ pip install skilled-llm
 
 **Key Features**:
 - **Unified interface**: CLIs implement same `BackendAdapter` as OpenAI/Anthropic
-- **Transparent routing**: LangGraph routes to CLIs just like hosted APIs
+- **Transparent routing**: LangGraph and steward agents route to CLIs just like hosted APIs
 - **Fallback support**: If CLI fails/times out, automatically fall back to API
 - **Test mode**: Simulator provides deterministic responses for CI without API costs
 - **Process isolation**: Each CLI execution is sandboxed with resource limits
+- **Tool-mode support**: Agents can call CLI-to-LLM as a subtask tool, not only as a full backend
 
 ### Core Components
 
@@ -182,11 +183,12 @@ pip install skilled-llm
 2. **LangGraph Orchestration**
    - Stateful workflow engine with checkpointing
    - Conditional execution (skip retrieval/critique when not needed)
-   - Durable execution with retries and resumption
+   - Durable execution with retries, resumption, and agent handoffs
 
 3. **Knowledge Layer**
-   - **LLM Wiki**: Curated docs, playbooks, glossaries (Markdown-based)
-   - **Vector Store**: Semantic search with metadata filtering (Qdrant)
+   - **LLM Wiki**: Curated docs, playbooks, glossaries stored in MinIO
+   - **Vector Store**: Semantic search with metadata filtering (Milvus)
+   - **Operating Modes**: `hybrid` (MinIO + Milvus), `wiki-only` (MinIO), `vector-only` (Milvus)
 
 4. **Backend Adapters**
    - Normalized interface for hosted LLMs, local models, and CLI tools
@@ -194,8 +196,13 @@ pip install skilled-llm
 
 5. **Operational Data** (Postgres)
    - Specializer configurations
+   - Ingestion jobs and version metadata
    - Request traces and metrics
    - Evaluation datasets and results
+
+6. **Multi-Agent Stewardship**
+   - Supervisor, Context, Backend Steward, Executor, Verifier, Recovery agents
+   - CLI-to-LLM accessible as both a backend and a callable execution tool
 
 ## Current Status
 
@@ -205,28 +212,44 @@ This repository currently contains a **local LLM simulator** used for testing CL
 
 **What exists now**:
 - FastAPI HTTP server with `/simulate` and `/v1/chat/completions` endpoints
-- Docker Compose setup for local development
+- Docker Compose setup for local development with MinIO integration
 - Shell wrappers for copilot-style and claude-style CLI interactions
 - Rule-based response simulator (no real LLM calls)
+- **MinIO S3-compatible storage** for LLM wiki and Ballerina context files
+- **Ballerina Context Manager Agent** for managing Ballerina project files
+- File upload/retrieval API endpoints for Ballerina context management
 - Basic test coverage
 
 **What's coming** (see [PROJECT_PLAN.md](project-plan/docs/PROJECT_PLAN.md)):
 
 | Phase | Timeline | Focus |
 |-------|----------|-------|
-| **Phase 1** | 1-2 weeks | Thin proxy with real LLM backend, streaming support |
-| **Phase 2** | 1-2 weeks | Knowledge pipeline (wiki + Qdrant vector retrieval) |
-| **Phase 3** | 1-2 weeks | Critique/verification loops, structured output |
-| **Phase 4** | 2 weeks | Multi-backend routing (Anthropic, CLI adapters) |
-| **Phase 5** | 1-2 weeks | Auth, rate limits, monitoring, production readiness |
+| **Phase 1** | 1-2 weeks | Thin proxy with backend registry and streaming support |
+| **Phase 2** | 1-2 weeks | Storage foundation (MinIO + Postgres + health checks) |
+| **Phase 3** | 1-2 weeks | LLM wiki pipeline (MinIO + Milvus retrieval) |
+| **Phase 4** | 1-2 weeks | Specializers, routing policy, and knowledge spaces |
+| **Phase 5** | 2-4 weeks | Multi-agent LLM steward with CLI-to-LLM tool use |
+| **Phase 6** | 1-2 weeks | Verification, repair, auth, monitoring, production readiness |
 
 ## Technology Stack
 
 - **Framework**: FastAPI (HTTP layer), LangGraph (orchestration)
 - **Language**: Python 3.11+
-- **Storage**: Postgres (operational data), Qdrant (vector search)
+- **Storage**: Postgres (metadata), MinIO (wiki object store), Milvus (vector search)
 - **Observability**: LangSmith or OpenTelemetry
 - **Deployment**: Docker Compose (dev), Kubernetes (production)
+
+## Knowledge Operating Modes
+
+The knowledge layer should not be all-or-nothing. Skilled LLM should start in the best available mode based on configured capabilities.
+
+| Mode | Services Available | Behavior | Limitations |
+|------|--------------------|----------|-------------|
+| **Hybrid** | MinIO + Milvus | Preferred mode. Store canonical wiki artifacts in MinIO and retrieve semantically through Milvus. | None beyond normal infrastructure complexity |
+| **Wiki-only** | MinIO only | Use compiled wiki pages and direct artifact lookup without vector search. Good for smaller corpora, debugging, and local-first setups. | No ANN semantic retrieval; relevance depends on structure, metadata, and deterministic lookup |
+| **Vector-only** | Milvus only | Query pre-indexed vectors and chunk metadata even if object storage is unavailable. Useful for retrieval-heavy read paths. | Limited canonical source dereference, limited wiki mutation, and citations may only point to chunk metadata |
+
+Design rule: the application should be able to start when one of these services is unavailable if the configured `knowledge_mode` allows degraded operation.
 
 ## Repository Layout
 
@@ -248,7 +271,7 @@ This repository currently contains a **local LLM simulator** used for testing CL
 │       ├── client.py        # HTTP client
 │       ├── cli.py           # CLI entrypoint
 │       ├── api/             # (Future) FastAPI routes
-│       ├── graph/           # (Future) LangGraph nodes
+│       ├── graph/           # (Future) LangGraph nodes + agent workflows
 │       ├── adapters/        # (Future) Backend adapters
 │       │   ├── base.py                    # BackendAdapter interface
 │       │   ├── simulator_adapter.py       # Refactored simulator
@@ -257,7 +280,9 @@ This repository currently contains a **local LLM simulator** used for testing CL
 │       │   ├── protocol_normalizer.py     # CLI output parsing
 │       │   ├── openai_adapter.py          # OpenAI API
 │       │   └── anthropic_adapter.py       # Anthropic API
-│       ├── knowledge/       # (Future) Wiki + vector retrieval
+│       ├── knowledge/       # (Future) MinIO-backed wiki + Milvus retrieval
+│       ├── agents/          # Agent modules (Ballerina Context Manager implemented)
+│       ├── storage/         # Storage clients (MinIO implemented)
 │       └── specializers/    # (Future) Config management
 ├── tests/                   # Unit and integration tests
 ├── infra/                   # (Future) Docker + K8s configs
@@ -294,7 +319,31 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
   -d @examples/claude-request.json
 ```
 
-### 4. Run without Docker
+### 4. Test Ballerina Context Manager (MinIO Integration)
+
+```bash
+# Run the comprehensive integration test
+./test_minio_integration.sh
+
+# Or test individual endpoints:
+
+# Upload a Ballerina file
+curl -X POST http://127.0.0.1:8080/ballerina/upload \
+  -H "Content-Type: application/json" \
+  -d @examples/ballerina-upload-example.json
+
+# List all projects
+curl http://127.0.0.1:8080/ballerina/projects
+
+# Get project summary
+curl http://127.0.0.1:8080/ballerina/summary/hello-project
+
+# Access MinIO console
+open http://localhost:9001
+# Username: minioadmin, Password: minioadmin
+```
+
+### 5. Run without Docker
 
 ```bash
 PYTHONPATH=src python3 -m cli_to_llm.cli serve --host 127.0.0.1 --port 8080
@@ -319,6 +368,102 @@ PYTHONPATH=src python3 -m cli_to_llm.cli copilot --direct -p "Create a shell scr
 make test
 ```
 
+## MinIO Integration and Ballerina Context Manager
+
+### Overview
+
+Skilled LLM now includes **MinIO** as an S3-compatible object storage service for managing LLM wiki content and Ballerina project files. The **Ballerina Context Manager Agent** provides a specialized interface for uploading, organizing, and retrieving Ballerina development files.
+
+### Architecture
+
+```
+┌──────────────────────────────────────┐
+│  HTTP API (/ballerina/*)             │
+├──────────────────────────────────────┤
+│  Ballerina Context Manager Agent     │
+├──────────────────────────────────────┤
+│  MinIO Client (S3-compatible)        │
+├──────────────────────────────────────┤
+│  MinIO Server                        │
+│  - Bucket: llm-wiki                  │
+│  - Bucket: ballerina-context         │
+└──────────────────────────────────────┘
+```
+
+### Features
+
+- **File Upload**: Upload Ballerina files (.bal, .toml, .md, .json, .yaml) with metadata
+- **Project Organization**: Organize files by project and module
+- **File Retrieval**: List and retrieve files with full metadata
+- **Project Summaries**: Get statistics and file type breakdown per project
+- **S3 Compatibility**: MinIO provides local S3-compatible storage for development
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/ballerina/upload` | Upload a file with base64-encoded content |
+| GET | `/ballerina/projects` | List all projects |
+| GET | `/ballerina/files/{project}` | List files in a project |
+| GET | `/ballerina/summary/{project}` | Get project summary with statistics |
+
+### MinIO Console
+
+Access the MinIO web console at: **http://localhost:9001**
+
+- **Username**: `minioadmin`
+- **Password**: `minioadmin`
+
+### Makefile Commands
+
+```bash
+# Check MinIO health
+make minio-status
+
+# List MinIO buckets
+make minio-buckets
+
+# Test file upload
+make minio-upload-test
+
+# Clean MinIO data
+make clean-minio
+```
+
+### Integration Test
+
+Run the comprehensive integration test:
+
+```bash
+./test_minio_integration.sh
+```
+
+This test validates:
+- Service health checks
+- File uploads (multiple file types)
+- Project listing and summaries
+- Error handling
+- File type validation
+
+### Documentation
+
+For detailed usage instructions, see:
+- [Ballerina Context Manager Documentation](docs/ballerina-context-manager.md)
+- Example payload: [ballerina-upload-example.json](examples/ballerina-upload-example.json)
+
+### Future Integration
+
+The MinIO storage layer will integrate with:
+- **Milvus** for vector embeddings and semantic search
+- **LangGraph agents** for context retrieval and injection
+- **Knowledge pipeline** for automatic indexing and chunking
+- **Multi-agent workflows** for Ballerina-specific development tasks
+
+Planned runtime modes for the knowledge stack:
+- **MinIO-only**: persist and browse wiki artifacts without vector infrastructure
+- **Milvus-only**: answer from pre-indexed vectors when canonical object storage is unavailable
+- **Hybrid**: use both together for the best combination of durable knowledge and fast retrieval
+
 ## Evaluation Strategy
 
 Skilled LLM justifies itself through **measurable improvements** over direct model calls.
@@ -327,8 +472,8 @@ Skilled LLM justifies itself through **measurable improvements** over direct mod
 - Answer accuracy and citation correctness
 - JSON validity and structured output compliance
 - Tool success rate and retrieval hit rate
-- Latency by execution mode (proxy/RAG/refine)
-- Cost per request and critique pass uplift
+- Latency by execution mode (`proxy` / `rag` / `steward`)
+- Cost per request and verifier pass uplift
 
 ### Benchmark Dataset
 - 50-100 representative prompts per domain
@@ -358,7 +503,7 @@ curl -X POST http://127.0.0.1:8080/admin/specializers \
 ### Adding knowledge sources (future)
 
 ```bash
-# Upload and index Markdown docs (Phase 2+)
+# Upload and index Markdown docs into MinIO (Phase 3+)
 curl -X POST http://127.0.0.1:8080/admin/knowledge/sources \
   -F "file=@docs/api-guide.md" \
   -F "specializer_id=my-specializer"
@@ -371,7 +516,7 @@ Specializers are configuration-driven. Example config:
 ```yaml
 id: code-assistant
 name: Code Assistant
-mode: refine
+mode: steward
 backend_targets:
   - provider: openai
     model: gpt-4
@@ -396,7 +541,7 @@ streaming_enabled: true
 | Risk | Mitigation |
 |------|------------|
 | **Slower than direct LLM calls** | Conditional retrieval/critique, caching, fast-path for simple requests |
-| **Over-orchestration hurts quality** | Per-specializer modes (proxy/RAG/refine), default to simplest effective graph |
+| **Over-orchestration hurts quality** | Per-specializer modes (`proxy` / `rag` / `steward`), default to simplest effective graph |
 | **CLI adapters are brittle** | Strict contracts, isolated execution, capture transcripts, keep optional |
 | **Knowledge base quality is poor** | Wiki-first curation, metadata preservation, separate retrieval evals |
 
@@ -406,9 +551,9 @@ The MVP is successful when:
 
 1. A client can call Skilled LLM via OpenAI-compatible API
 2. System selects appropriate specializer profile
-3. Wiki + vector retrieval inject domain context
+3. MinIO-backed wiki + Milvus retrieval inject domain context
 4. Backend LLM generates draft response
-5. LangGraph optionally critiques and repairs output
+5. Multi-agent steward optionally verifies, critiques, and repairs output
 6. **Final response measurably outperforms direct backend baseline on eval dataset**
 
 ## Contributing
@@ -428,7 +573,7 @@ See [PROJECT_PLAN.md](project-plan/docs/PROJECT_PLAN.md) for detailed roadmap an
 - **[Modular Architecture](project-plan/docs/MODULAR_ARCHITECTURE.md)** - How layers work independently
 
 ### Planning & Architecture
-- **[Project Plan](project-plan/docs/PROJECT_PLAN.md)** - Complete vision, architecture, and 5-phase delivery plan
+- **[Project Plan](project-plan/docs/PROJECT_PLAN.md)** - Complete vision, architecture, and milestone delivery plan
 - **[CLI Component Design](project-plan/docs/CLI_TO_LLM_COMPONENT_DESIGN.md)** - Visual summary: transformation from simulator to integrated component
 - **[CLI Integration Architecture](project-plan/docs/ARCHITECTURE_CLI_INTEGRATION.md)** - Deep dive: how CLI-to-LLM works as a backend adapter (technical specs, code examples)
 - **[Implementation Roadmap](project-plan/docs/IMPLEMENTATION_ROADMAP.md)** - Step-by-step migration guide with concrete tasks and code samples
@@ -461,7 +606,7 @@ Client → HTTP Server → Simulator → Rule-based Response
 ```
 Client → Skilled LLM API
            ↓
-       LangGraph Orchestration
+       LangGraph + Agent Control Plane
            ↓
        Backend Router
            ├─ OpenAI Adapter
@@ -479,6 +624,7 @@ Client → Skilled LLM API
 2. **CI/CD**: Deterministic tests with no external dependencies
 3. **Production**: Route to real CLIs when installed and authenticated
 4. **Hybrid**: Fallback from CLI → API if CLI fails
+5. **Agent execution**: Use CLI-to-LLM as a subtask tool inside supervised workflows
 
 See [ARCHITECTURE_CLI_INTEGRATION.md](project-plan/docs/ARCHITECTURE_CLI_INTEGRATION.md) for the complete design.
 

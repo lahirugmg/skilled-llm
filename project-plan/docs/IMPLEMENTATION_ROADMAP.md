@@ -2,7 +2,7 @@
 
 ## Overview
 
-This roadmap shows how to evolve from the current CLI-to-LLM simulator into the full Skilled LLM architecture, treating CLI-to-LLM as a first-class backend adapter component.
+This roadmap shows how to evolve from the current CLI-to-LLM simulator into the full Skilled LLM architecture, treating CLI-to-LLM as a first-class backend adapter component inside a larger stack that also includes MinIO-backed wiki storage, Milvus retrieval, and a LangGraph-based multi-agent steward.
 
 ## Guiding Principles
 
@@ -11,6 +11,7 @@ This roadmap shows how to evolve from the current CLI-to-LLM simulator into the 
 3. **Test-driven**: Every component has unit + integration tests
 4. **Backend parity**: All adapters implement the same interface
 5. **Evaluation-first**: Measure improvements with real benchmarks
+6. **Graceful degradation**: Knowledge services can run in `hybrid`, `wiki-only`, or `vector-only` modes
 
 ## Phase 0.5: Refactor Existing Code into Adapters
 
@@ -773,39 +774,48 @@ app.include_router(completions.router)
 
 ---
 
-## Phase 2: Knowledge Pipeline (RAG)
+## Phase 2: Storage Foundation
 
 **Duration**: 1-2 weeks
-**Goal**: Add wiki ingestion and vector retrieval
+**Goal**: Stand up MinIO and Postgres as the durable wiki and control-plane foundation
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) Phase 2 for details.
 
 ---
 
-## Phase 3: LangGraph Orchestration
+## Phase 3: LLM Wiki Pipeline
 
 **Duration**: 1-2 weeks
-**Goal**: Add critique loops and multi-pass refinement
+**Goal**: Build the MinIO-to-Milvus wiki ingestion and retrieval path
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) Phase 3 for details.
 
 ---
 
-## Phase 4: Multi-Backend Expansion
+## Phase 4: Specializers and Routing
 
-**Duration**: 2 weeks
-**Goal**: Add Anthropic, routing policies, fallback logic
+**Duration**: 1-2 weeks
+**Goal**: Add specializer-aware routing, knowledge spaces, and backend policy
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) Phase 4 for details.
 
 ---
 
-## Phase 5: Production Hardening
+## Phase 5: Multi-Agent LLM Steward
 
-**Duration**: 1-2 weeks
-**Goal**: Auth, monitoring, deployment
+**Duration**: 2-4 weeks
+**Goal**: Add Supervisor, Context, Backend Steward, Executor, Verifier, and Recovery agents
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) Phase 5 for details.
+
+---
+
+## Phase 6: Verification and Production Hardening
+
+**Duration**: 1-2 weeks
+**Goal**: Add citation verification, reconciliation jobs, auth, monitoring, and deployment
+
+See [PROJECT_PLAN.md](PROJECT_PLAN.md) Phase 6 for details.
 
 ---
 
@@ -822,8 +832,33 @@ See [PROJECT_PLAN.md](PROJECT_PLAN.md) Phase 5 for details.
 - **E2E**: Full request through each backend
 - **Load**: Concurrency limits work correctly
 
-### Phase 2+ Tests
-- See [PROJECT_PLAN.md](PROJECT_PLAN.md) evaluation strategy
+### Phase 2 Tests
+- **Unit**: MinIO client, artifact versioning, Postgres metadata models
+- **Integration**: upload/download flows against local MinIO, metadata persistence in Postgres
+- **E2E**: source registration produces versioned object artifacts
+- **E2E**: service starts successfully in `wiki-only` mode without Milvus
+
+### Phase 3 Tests
+- **Unit**: chunking, embedding manifests, Milvus index wrapper
+- **Integration**: ingestion pipeline from MinIO to Milvus
+- **E2E**: retrieved chunks map back to canonical MinIO sources
+- **E2E**: service starts successfully in `vector-only` mode with pre-indexed vectors and no MinIO dependency
+
+### Phase 4 Tests
+- **Unit**: specializer config loading, routing policy evaluation
+- **Integration**: specializer-scoped retrieval and backend policy enforcement
+- **E2E**: one specializer routes differently from another using the same API
+- **E2E**: specializers can require `hybrid` mode or permit degraded knowledge modes
+
+### Phase 5 Tests
+- **Unit**: agent state transitions and failure handling
+- **Integration**: Supervisor, Context, Executor, and Verifier handoffs
+- **E2E**: agents can invoke `cli-to-llm` as both backend and tool
+
+### Phase 6 Tests
+- **Unit**: citation verification and reconciliation jobs
+- **Integration**: storage/index drift detection between MinIO and Milvus
+- **E2E**: auth, monitoring hooks, and deployment smoke tests
 
 ---
 
@@ -844,25 +879,41 @@ See [PROJECT_PLAN.md](PROJECT_PLAN.md) Phase 5 for details.
   - [ ] Add configuration system
   - [ ] E2E tests with all backends
 
-- [ ] **Phase 2**: Knowledge pipeline
+- [ ] **Phase 2**: Storage foundation
+  - [ ] Stand up MinIO locally
+  - [ ] Define wiki bucket/prefix layout
+  - [ ] Implement object storage client
+  - [ ] Create Postgres metadata schema
+  - [ ] Add storage health checks
+  - [ ] Add `knowledge_mode` capability detection
+
+- [ ] **Phase 3**: LLM wiki pipeline
   - [ ] Wiki ingestion
-  - [ ] Qdrant integration
+  - [ ] Normalized markdown artifacts in MinIO
+  - [ ] Milvus integration
   - [ ] Retrieval node
-  - [ ] Context injection
+  - [ ] Context injection with citations
+  - [ ] `wiki-only` and `vector-only` retrieval behavior
 
-- [ ] **Phase 3**: LangGraph
-  - [ ] Graph state definition
-  - [ ] Node implementations
-  - [ ] Critique/verify loops
-  - [ ] Structured output
-
-- [ ] **Phase 4**: Multi-backend
+- [ ] **Phase 4**: Specializers and routing
+  - [ ] Specializer knowledge spaces
   - [ ] Anthropic adapter
   - [ ] Routing policies
-  - [ ] Fallback logic
+  - [ ] Backend constraints by specializer
   - [ ] Health monitoring
+  - [ ] Mode requirements per specializer
 
-- [ ] **Phase 5**: Production
+- [ ] **Phase 5**: Multi-agent steward
+  - [ ] Graph state definition
+  - [ ] Supervisor agent
+  - [ ] Context agent
+  - [ ] Backend Steward + Executor agents
+  - [ ] Verifier + Recovery agents
+  - [ ] `cli-to-llm` tool integration
+
+- [ ] **Phase 6**: Verification and production
+  - [ ] Citation verification
+  - [ ] MinIO/Milvus reconciliation
   - [ ] Authentication
   - [ ] Rate limiting
   - [ ] Monitoring/alerting
@@ -880,10 +931,12 @@ Track these throughout implementation:
 | 0.5 | Regression | 0 broken tests |
 | 1 | Backend parity | OpenAI-compatible responses |
 | 1 | Latency overhead | <100ms vs direct |
-| 2 | Retrieval quality | >70% hit rate |
-| 3 | Quality improvement | >15% over direct model |
-| 4 | Fallback success | >95% requests succeed |
-| 5 | Uptime | >99.5% |
+| 2 | Storage readiness | 100% artifact version traceability |
+| 3 | Retrieval quality | >70% hit rate |
+| 4 | Policy correctness | Specializer routing matches config |
+| 5 | Agent recovery | >90% recoverable failures rerouted or repaired |
+| 6 | Uptime | >99.5% |
+| 6 | Degraded-mode availability | Service starts correctly in configured partial mode |
 
 ---
 
@@ -892,5 +945,6 @@ Track these throughout implementation:
 1. **Review this roadmap** with stakeholders
 2. **Set up project tracking** (GitHub Projects, Jira, etc.)
 3. **Start Phase 0.5** - create adapter branch
-4. **Daily standups** during active development
-5. **Demo at end of each phase** to validate progress
+4. **Lock storage decisions early** - MinIO bucket strategy, Milvus collection strategy, Postgres schema
+5. **Daily standups** during active development
+6. **Demo at end of each phase** to validate progress

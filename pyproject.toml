@@ -8,7 +8,10 @@ version = "0.1.0"
 description = "Local Dockerized simulator for Copilot CLI and Claude CLI style interactions."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "minio>=7.2.0",
+    "python-multipart>=0.0.6",
+]
 
 [project.scripts]
 cli-to-llm = "cli_to_llm.cli:main"

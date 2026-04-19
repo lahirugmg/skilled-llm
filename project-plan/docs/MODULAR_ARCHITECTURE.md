@@ -11,15 +11,15 @@ Skilled LLM is designed as a **composable stack of independent modules**, not a 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Layer 4: Specialization Harness (Optional)             │
-│  • LangGraph orchestration                              │
+│  • LangGraph orchestration + agent stewardship          │
 │  • Critique/repair loops                                │
-│  • Multi-pass refinement                                │
+│  • Multi-pass refinement + verification                 │
 │  Requires: Layer 1 OR Layer 2 OR Layer 3                │
 └────────────────────┬────────────────────────────────────┘
                      │
 ┌─────────────────────────────────────────────────────────┐
 │  Layer 3: Context Engineering (Optional)                │
-│  • RAG (wiki + vector retrieval)                        │
+│  • RAG (MinIO wiki + Milvus retrieval)                  │
 │  • Knowledge ingestion                                  │
 │  • Prompt enrichment                                    │
 │  Requires: Layer 1 OR Layer 2                           │
@@ -242,9 +242,11 @@ This layer **depends on Layer 1 or Layer 2** but is independent of Layer 4.
 ### What It Adds
 
 - Wiki-based knowledge management
-- Vector search (Qdrant)
+- MinIO-backed wiki artifact storage
+- Vector search (Milvus)
 - Document ingestion pipeline
 - Context injection into prompts
+- Degraded operation in `hybrid`, `wiki-only`, and `vector-only` modes
 
 ### Installation
 
@@ -261,11 +263,16 @@ pip install skilled-llm-context
 ```yaml
 # context.yaml
 knowledge:
-  wiki_path: ./knowledge/wiki
+  mode: hybrid  # hybrid | wiki-only | vector-only
+  object_store:
+    type: minio
+    endpoint: http://localhost:9000
+    bucket: skilled-llm-wiki
+    enabled: true
   vector_store:
-    type: qdrant
-    host: localhost
-    port: 6333
+    type: milvus
+    uri: http://localhost:19530
+    enabled: true
 
 retrieval:
   top_k: 5
@@ -279,6 +286,7 @@ retrieval:
 2. **Better accuracy**: Provide relevant context automatically
 3. **Citation support**: Track where answers come from
 4. **Knowledge versioning**: Update docs without retraining models
+5. **Graceful fallback**: Keep serving from MinIO-only or Milvus-only during partial outages
 
 ---
 
@@ -286,16 +294,18 @@ retrieval:
 
 ### Purpose
 
-**Multi-pass refinement with critique loops and verification.**
+**Multi-pass refinement with critique loops, verification, and a multi-agent control plane.**
 
 This layer **depends on Layer 1/2/3** and adds quality improvement workflows.
 
 ### What It Adds
 
 - LangGraph orchestration
+- Supervisor, Context, Backend Steward, Executor, Verifier, Recovery agents
 - Critique and repair loops
 - Structured output enforcement
 - Multi-step workflows
+- `cli-to-llm` as both backend and callable tool
 
 ### Installation
 
@@ -313,7 +323,7 @@ pip install skilled-llm-harness
 # harness.yaml
 specializer:
   name: code-assistant
-  mode: refine  # proxy | rag | refine
+  mode: steward  # proxy | rag | steward
 
   workflow:
     - retrieve_context  # Layer 3
@@ -340,7 +350,7 @@ specializer:
 |---------------|---------|--------------|
 | **Just CLI normalization** | `pip install cli-to-llm` | None |
 | **+ Multi-backend routing** | `pip install cli-to-llm[router]` | cli-to-llm |
-| **+ RAG/knowledge** | `pip install cli-to-llm[context]` | cli-to-llm, qdrant |
+| **+ RAG/knowledge** | `pip install cli-to-llm[context]` | cli-to-llm, minio and/or milvus |
 | **+ Critique loops** | `pip install cli-to-llm[harness]` | cli-to-llm, langgraph |
 | **Full stack** | `pip install skilled-llm` | All layers |
 
@@ -393,13 +403,21 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - qdrant
+      - minio
+      - milvus
       - postgres
 
-  qdrant:
-    image: qdrant/qdrant:latest
+  minio:
+    image: minio/minio:latest
     ports:
-      - "6333:6333"
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+
+  milvus:
+    image: milvusdb/milvus:v2.5.0
+    ports:
+      - "19530:19530"
 
   postgres:
     image: postgres:16
@@ -407,7 +425,73 @@ services:
       POSTGRES_DB: skilled_llm
 ```
 
-**Use case**: Production RAG system with knowledge management.
+**Use case**: Production RAG system with MinIO-backed wiki storage and Milvus retrieval.
+
+---
+
+### Pattern 4: Wiki-Only Mode
+
+```yaml
+services:
+  skilled-llm:
+    image: skilled-llm:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      - minio
+      - postgres
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+```
+
+```yaml
+knowledge:
+  mode: wiki-only
+  object_store:
+    type: minio
+    bucket: skilled-llm-wiki
+  vector_store:
+    enabled: false
+```
+
+**Use case**: Small corpora, local-first setups, or deployments where canonical wiki storage matters more than semantic search.
+
+---
+
+### Pattern 5: Vector-Only Mode
+
+```yaml
+services:
+  skilled-llm:
+    image: skilled-llm:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      - milvus
+      - postgres
+
+  milvus:
+    image: milvusdb/milvus:v2.5.0
+    ports:
+      - "19530:19530"
+```
+
+```yaml
+knowledge:
+  mode: vector-only
+  object_store:
+    enabled: false
+  vector_store:
+    type: milvus
+    uri: http://localhost:19530
+```
+
+**Use case**: Retrieval-heavy read paths over pre-indexed data when object storage is unavailable or intentionally omitted.
 
 ---
 
@@ -611,19 +695,26 @@ backends:
   # ... (from router.yaml)
 
 knowledge:
-  wiki_path: ./knowledge
+  object_store:
+    type: minio
+    bucket: skilled-llm-wiki
   vector_store:
-    type: qdrant
-    url: http://localhost:6333
+    type: milvus
+    uri: http://localhost:19530
 
 specializers:
   - name: code-assistant
-    mode: refine
+    mode: steward
     knowledge_spaces: [architecture-docs]
-    workflow: [retrieve, invoke, critique, repair]
+    workflow: [retrieve, invoke, verify, repair]
 ```
 
-**Now you have the full power**: RAG + routing + critique loops.
+**Now you have the full power**: RAG + routing + agent supervision.
+
+The same context layer can also operate in:
+
+- `wiki-only` mode: query compiled wiki artifacts directly from MinIO
+- `vector-only` mode: query Milvus collections without canonical object dereference
 
 ---
 
@@ -707,14 +798,15 @@ skilledllm/
 
 ### Layer 3: Context
 - [ ] Can work with Layer 1 OR Layer 2
-- [ ] Ingests Markdown docs into vector store
+- [ ] Ingests Markdown docs into MinIO and indexes them in Milvus
 - [ ] Retrieval accuracy >70% hit rate
 - [ ] Context injection improves accuracy by >15%
+- [ ] Supports `wiki-only` and `vector-only` degraded modes
 
 ### Layer 4: Harness
 - [ ] Can work with any lower layer
 - [ ] LangGraph workflows execute correctly
-- [ ] Critique loops measurably improve quality
+- [ ] Multi-agent steward can supervise, verify, and recover
 - [ ] Supports streaming
 
 ---
@@ -729,7 +821,7 @@ skilledllm/
 1. Create `packages/cli-to-llm/` directory
 2. Move `src/cli_to_llm/` → `packages/cli-to-llm/src/cli_to_llm/`
 3. Create standalone `pyproject.toml`
-4. Ensure no dependencies on Qdrant, LangGraph, etc.
+4. Ensure no dependencies on MinIO, Milvus, LangGraph, etc.
 5. Add standalone CLI: `cli-to-llm serve`
 6. Publish to PyPI as `cli-to-llm`
 
@@ -761,7 +853,7 @@ skilledllm/
 **Steps**:
 1. Create `packages/context/` directory
 2. Implement wiki ingestion
-3. Add Qdrant integration
+3. Add MinIO + Milvus integration
 4. Import either `cli_to_llm` OR `skilled_llm_router`
 5. Publish to PyPI as `skilled-llm-context`
 
@@ -772,19 +864,20 @@ skilledllm/
 
 ### Phase 4: Create Harness Package (Optional)
 
-**Goal**: Extract LangGraph orchestration into `packages/harness/`
+**Goal**: Extract LangGraph orchestration and agent stewardship into `packages/harness/`
 
 **Steps**:
 1. Create `packages/harness/` directory
 2. Implement LangGraph workflows
-3. Add critique/repair nodes
-4. Import from any lower layer
-5. Publish to PyPI as `skilled-llm-harness`
+3. Add Supervisor, Context, Executor, Verifier, and Recovery agents
+4. Add critique/repair nodes
+5. Import from any lower layer
+6. Publish to PyPI as `skilled-llm-harness`
 
 **Exit Criteria**:
 - Can install: `pip install skilled-llm-harness`
 - LangGraph workflows execute
-- Critique loops work
+- Critique loops and agent supervision work
 
 ---
 

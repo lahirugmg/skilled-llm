@@ -1,0 +1,10 @@
+{
+  "filename": "hello_world.bal",
+  "content": "aW1wb3J0IGJhbGxlcmluYS9pbzsKCnB1YmxpYyBmdW5jdGlvbiBtYWluKCkgewogICAgaW86cHJpbnRsbigiSGVsbG8sIFdvcmxkISIpOwp9Cg==",
+  "project": "hello-project",
+  "module": "main",
+  "metadata": {
+    "author": "skilled-llm",
+    "description": "Simple hello world Ballerina program"
+  }
+}

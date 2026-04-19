@@ -6,8 +6,14 @@ RUN apt-get update \
 	&& apt-get install -y --no-install-recommends gh git ca-certificates \
 	&& rm -rf /var/lib/apt/lists/*
 
-COPY src /app/src
+# Copy pyproject.toml and source code needed for installation
+COPY pyproject.toml /app/pyproject.toml
 COPY README.md /app/README.md
+COPY src /app/src
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -e .
+
 COPY docs /app/docs
 COPY examples /app/examples
 COPY bin/container-entrypoint.sh /usr/local/bin/container-entrypoint.sh
