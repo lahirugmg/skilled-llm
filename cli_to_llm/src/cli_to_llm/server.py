@@ -43,7 +43,10 @@ class SimulatorRequestHandler(BaseHTTPRequestHandler):
         content_length = self.headers.get("Content-Length")
         if not content_length:
             raise ValueError("missing Content-Length header")
-        raw_body = self.rfile.read(int(content_length))
+        length = int(content_length)
+        if length > 5 * 1024 * 1024:  # 5 MB limit
+            raise ValueError("payload exceeds 5MB limit")
+        raw_body = self.rfile.read(length)
         try:
             payload = json.loads(raw_body.decode("utf-8"))
         except json.JSONDecodeError as exc:
@@ -96,6 +99,8 @@ def handle_get(path: str, default_model: str = DEFAULT_MODEL) -> tuple[HTTPStatu
         parts = path.split("/")
         if len(parts) >= 4:
             project_name = parts[3]
+            if not project_name or ".." in project_name or "/" in project_name or "\\" in project_name:
+                return HTTPStatus.BAD_REQUEST, {"error": "invalid project name"}
             try:
                 context_manager = BallerinaContextManager()
                 files = context_manager.list_files(project_name=project_name)
@@ -108,6 +113,8 @@ def handle_get(path: str, default_model: str = DEFAULT_MODEL) -> tuple[HTTPStatu
         parts = path.split("/")
         if len(parts) >= 4:
             project_name = parts[3]
+            if not project_name or ".." in project_name or "/" in project_name or "\\" in project_name:
+                return HTTPStatus.BAD_REQUEST, {"error": "invalid project name"}
             try:
                 context_manager = BallerinaContextManager()
                 summary = context_manager.get_project_summary(project_name)
